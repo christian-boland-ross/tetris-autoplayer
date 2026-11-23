@@ -163,3 +163,24 @@ You should not have to change anything but player.py, but modifying other files 
 
 The grading server has a vanilla verion of python installed, with no additional libraries. If you include any external libraries in your code, you will find that your solution will crash when run on the grading server. You must write your solution code yourself without using any additional libraries.<br>
 If you’re considering an advanced solution and want to use external code to train weights in your program, this is permitted, but that code must not be included in your player.py file.
+
+### Suggested strategy overview
+
+### Target-State Search
+Because future blocks beyond board.next are unknown, search over candidate landing placements:
+1. Test all rotations (0–3) and columns (0–9) — at most ≈40 placements.
+2. Simulate each on board.clone() ending with Direction.Drop.
+3. Score the resulting board and pick the maximum.
+Lookahead: Extending to board.next tests ≈1,600 states (respecting O(bd) runtime bounds).
+
+### Linear Heuristic Evaluation
+
+Combine structural features with tuned weights,
+```
+E(s) = w1 ∆S− w2 H− w3 K− w4 B,
+```
+where:
+- `∆S`: Score gain (rewards 3–4 row clears).
+- `H`: Aggregate or maximum column height.
+- `K`: Buried empty holes under blocks.
+- `B`: Surface bumpiness `∑x |hx − hx+1 |`.
