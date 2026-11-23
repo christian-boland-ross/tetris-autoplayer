@@ -1,5 +1,3 @@
-from collections import deque
-
 from board import Action, Block, Direction, Rotation, Shape
 
 
@@ -13,54 +11,70 @@ class SearchPlayer(Player):
         if start_y is None:
             start_y = block.center[1]
 
-        queue = deque([(block.clone(), list(prefix))])
-        visited = set()
         landings = {}
-        actions = (
-            Direction.Left,
-            Direction.Right,
-            Rotation.Clockwise,
-            Rotation.Anticlockwise,
-            None,
-        )
+        for rotations in range(4):
+            rotated_board = board.clone()
+            rotated = block.clone()
+            rotation_path = list(prefix)
+            landed_early = False
 
-        def add_landing(landed, path):
-            key = tuple(sorted(landed.cells))
-            drop_score = landed.center[1] - start_y
-            previous = landings.get(key)
-            if (previous is None or drop_score > previous[2]
-                    or (drop_score == previous[2]
-                        and len(path) < len(previous[1]))):
-                landings[key] = (landed, path, drop_score)
+            for _ in range(rotations):
+                rotated.rotate(Rotation.Clockwise, rotated_board)
+                rotation_path.append(Rotation.Clockwise)
+                if rotated.move(Direction.Down, rotated_board):
+                    key = tuple(sorted(rotated.cells))
+                    landings[key] = (
+                        rotated.clone(),
+                        list(rotation_path),
+                        rotated.center[1] - start_y,
+                    )
+                    landed_early = True
+                    break
 
-        while queue:
-            current, path = queue.popleft()
-            state = (tuple(sorted(current.cells)), current.center)
-            if state in visited:
+            if landed_early:
                 continue
-            visited.add(state)
 
-            dropped = current.clone()
-            while not dropped.supported(board):
-                dropped.cells = {(x, y + 1) for x, y in dropped.cells}
-                dropped.center = (dropped.center[0], dropped.center[1] + 1)
-            add_landing(dropped, path + [Direction.Drop])
+            width = rotated.right - rotated.left + 1
+            for target_left in range(board.width - width + 1):
+                simulation = rotated_board.clone()
+                current = rotated.clone()
+                path = list(rotation_path)
+                landed_early = False
 
-            for action in actions:
-                moved = current.clone()
-                if isinstance(action, Direction):
-                    moved.move(action, board)
-                elif isinstance(action, Rotation):
-                    score = board.score
-                    moved.rotate(action, board)
-                    board.score = score
+                while current.left != target_left:
+                    direction = (
+                        Direction.Left
+                        if current.left > target_left
+                        else Direction.Right
+                    )
+                    current.move(direction, simulation)
+                    path.append(direction)
+                    if current.move(Direction.Down, simulation):
+                        key = tuple(sorted(current.cells))
+                        option = (
+                            current.clone(),
+                            path,
+                            current.center[1] - start_y,
+                        )
+                        previous = landings.get(key)
+                        if previous is None or len(option[1]) < len(previous[1]):
+                            landings[key] = option
+                        landed_early = True
+                        break
 
-                if moved.supported(board):
-                    add_landing(moved, path + [action])
+                if landed_early:
                     continue
-                moved.cells = {(x, y + 1) for x, y in moved.cells}
-                moved.center = (moved.center[0], moved.center[1] + 1)
-                queue.append((moved, path + [action]))
+
+                current.move(Direction.Drop, simulation)
+                key = tuple(sorted(current.cells))
+                option = (
+                    current.clone(),
+                    path + [Direction.Drop],
+                    current.center[1] - start_y,
+                )
+                previous = landings.get(key)
+                if previous is None or len(option[1]) < len(previous[1]):
+                    landings[key] = option
 
         return list(landings.values())
 
@@ -96,12 +110,24 @@ class SearchPlayer(Player):
         )
         max_height = max(heights, default=0)
         danger = max(0, max_height - 14)
+        row_completion = sum(
+            (sum((x, y) in board.cells for x in range(board.width))
+             / board.width) ** 3
+            for y in range(board.height)
+        )
+        wells = sum(
+            min(4, max(0, min(heights[x - 1], heights[x + 1]) - heights[x]))
+            for x in range(1, board.width - 1)
+        )
         return (
             -2.0 * aggregate_height
             - 14.0 * holes
             - 1.5 * bumpiness
             - 4.0 * max_height
+            - 0.1 * len(board.cells)
             - 12.0 * danger * danger
+            + 12.0 * row_completion
+            + 2.5 * wells
         )
 
     def _best_next_value(self, board):
@@ -150,7 +176,7 @@ class SearchPlayer(Player):
         next_shape = board.next.shape if board.next is not None else None
         normal_options = self._landing_options(board, board.falling)
         normal_ranked = self._rank_options(
-            board, normal_options, next_shape, 2
+            board, normal_options, next_shape, len(normal_options)
         )
         for item in normal_ranked:
             value = self._lookahead_value(item, next_shape)
@@ -158,17 +184,8 @@ class SearchPlayer(Player):
                 best_value = value
                 best_path = item[1][1]
 
-        max_height = max(
-            (
-                board.height - min(y for cell_x, y in board.cells
-                                   if cell_x == x)
-                for x in range(board.width)
-                if any(cell_x == x for cell_x, _ in board.cells)
-            ),
-            default=0,
-        )
         if board.bombs_remaining > 0 and board.next is not None \
-                and board.next.shape is not Shape.B and max_height >= 8:
+                and board.next.shape is not Shape.B:
             bomb_board = board.clone()
             bomb_board.bomb()
             if bomb_board.falling is not None \
@@ -187,22 +204,9 @@ class SearchPlayer(Player):
                         best_value = value
                         best_path = item[1][1]
 
-        if board.discards_remaining > 0 and board.next is not None \
-                and normal_ranked and not normal_ranked[0][2].alive:
-            discard_board = board.clone()
-            discard_board.discard()
-            if discard_board.falling is not None:
-                for option in self._landing_options(
-                    discard_board, discard_board.falling
-                ):
-                    result = self._land(discard_board, option)
-                    value = (
-                        result.score - discard_board.score
-                        + self._potential(result) - 40
-                    )
-                    if value > best_value:
-                        best_value = value
-                        best_path = [Action.Discard] + option[1]
+        if board.discards_remaining > 0 and board.next is not None:
+            if normal_ranked and not normal_ranked[0][2].alive:
+                best_path = [Action.Discard]
 
         return best_path
 
