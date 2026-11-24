@@ -25,6 +25,7 @@ class SearchPlayer(Player):
     }
     AGGREGATE_HEIGHT_WEIGHT = 2.0
     HOLE_WEIGHT = 14.0
+    COVERED_HOLE_WEIGHT = 0.05
     BUMPINESS_WEIGHT = 1.5
     MAX_HEIGHT_WEIGHT = 4.0
     DANGER_WEIGHT = 40.0
@@ -37,6 +38,9 @@ class SearchPlayer(Player):
 
     def _endgame_progress(self):
         return max(0.0, min(1.0, (self.pieces_played - 340) / 60.0))
+
+    def _stack_pressure(self, max_height):
+        return max(0.0, min(1.0, (max_height - 16) / 6.0))
 
     def _landing_options(self, board, block, start_y=None, prefix=()):
         if start_y is None:
@@ -127,11 +131,15 @@ class SearchPlayer(Player):
 
         heights = [board.height - top for top in column_tops]
         holes = 0
+        covered_holes = 0
         for x, top in enumerate(column_tops):
-            holes += sum(
-                (x, y) not in board.cells
-                for y in range(top + 1, board.height)
-            )
+            blocks_above = 0
+            for y in range(top, board.height):
+                if (x, y) in board.cells:
+                    blocks_above += 1
+                else:
+                    holes += 1
+                    covered_holes += blocks_above
 
         aggregate_height = sum(heights)
         bumpiness = sum(
@@ -139,8 +147,17 @@ class SearchPlayer(Player):
             for x in range(board.width - 1)
         )
         max_height = max(heights, default=0)
+        stack_pressure = self._stack_pressure(max_height)
         danger = max(0, max_height - 14)
         endgame = self._endgame_progress()
+        blocked_spawns = 0
+        if stack_pressure > 0:
+            for shape in self.PIECE_SHAPES:
+                spawn = Block(shape)
+                spawn.initialize(board)
+                if spawn.collides(board):
+                    blocked_spawns += 1
+
         row_completion = sum(
             (count / board.width) ** 3 for count in row_counts
         )
@@ -169,19 +186,33 @@ class SearchPlayer(Player):
                 ),
             )
 
+        aggregate_height_weight = (
+            self.AGGREGATE_HEIGHT_WEIGHT + 2.0 * stack_pressure
+        )
+        hole_weight = self.HOLE_WEIGHT + stack_pressure
+        covered_hole_weight = self.COVERED_HOLE_WEIGHT + 0.025 * stack_pressure
         occupied_cell_weight = 0.1 + 1.5 * endgame
-        danger_weight = self.DANGER_WEIGHT + 12.0 * endgame
-        i_well_weight = self.I_WELL_WEIGHT * (1.0 - 0.8 * endgame)
+        danger_weight = (
+            self.DANGER_WEIGHT + 100.0 * stack_pressure + 12.0 * endgame
+        )
+        well_weight = self.WELL_WEIGHT * (1.0 - 0.75 * stack_pressure)
+        i_well_weight = (
+            self.I_WELL_WEIGHT
+            * (1.0 - 0.8 * endgame)
+            * (1.0 - 0.75 * stack_pressure)
+        )
 
         return (
-            -self.AGGREGATE_HEIGHT_WEIGHT * aggregate_height
-            -self.HOLE_WEIGHT * holes
+            -aggregate_height_weight * aggregate_height
+            -hole_weight * holes
+            -covered_hole_weight * covered_holes
             -self.BUMPINESS_WEIGHT * bumpiness
             -self.MAX_HEIGHT_WEIGHT * max_height
             -occupied_cell_weight * len(board.cells)
             -danger_weight * danger * danger
+            -2500.0 * blocked_spawns
             + self.ROW_COMPLETION_WEIGHT * row_completion
-            + self.WELL_WEIGHT * wells
+            + well_weight * wells
             + i_well_weight * i_well_potential
         )
 
@@ -200,11 +231,12 @@ class SearchPlayer(Player):
             ),
             default=0,
         )
+        stack_pressure = self._stack_pressure(max_height)
         low_stack_bonus = (
             1.05 if self.pieces_played < 340 and max_height <= 8 else 1.0
         )
         return adjustment * (
-            low_stack_bonus + 0.5 * endgame
+            low_stack_bonus + 0.5 * endgame + 0.5 * stack_pressure
         )
 
     def _best_next_value(self, board):
