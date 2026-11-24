@@ -7,6 +7,9 @@ class Player:
 
 
 class SearchPlayer(Player):
+    MAX_REACHABLE_STATES = 80
+    TUCK_THRESHOLD = 100
+
     PIECE_SHAPES = (
         Shape.I,
         Shape.J,
@@ -42,7 +45,7 @@ class SearchPlayer(Player):
     def _stack_pressure(self, max_height):
         return max(0.0, min(1.0, (max_height - 16) / 6.0))
 
-    def _landing_options(self, board, block, start_y=None, prefix=()):
+    def _target_landing_options(self, board, block, start_y=None, prefix=()):
         if start_y is None:
             start_y = block.center[1]
 
@@ -112,6 +115,122 @@ class SearchPlayer(Player):
                     landings[key] = option
 
         return list(landings.values())
+
+    def _advance_state(self, block, action, board):
+        moved = block.clone()
+        score_before = board.score
+
+        if isinstance(action, Direction):
+            moved.move(action, board)
+        elif isinstance(action, Rotation):
+            moved.rotate(action, board)
+
+        landed = moved.move(Direction.Down, board)
+        drop_score = board.score - score_before
+        board.score = score_before
+        return moved, drop_score, landed
+
+    def _reachable_landing_options(self, board, block, start_y, prefix):
+        landings = {}
+        initial = block.clone()
+        queue = [(initial, list(prefix), 0)]
+        visited = {
+            (tuple(sorted(initial.cells)), initial.center)
+        }
+        actions = (
+            None,
+            Direction.Left,
+            Direction.Right,
+            Direction.Down,
+            Rotation.Clockwise,
+            Rotation.Anticlockwise,
+        )
+        expanded = 0
+
+        def add_landing(landed, path, drop_score):
+            key = tuple(sorted(landed.cells))
+            previous = landings.get(key)
+            if previous is None or drop_score > previous[2] \
+                    or (drop_score == previous[2]
+                        and len(path) < len(previous[1])):
+                landings[key] = (landed.clone(), path, drop_score)
+
+        while queue and expanded < self.MAX_REACHABLE_STATES:
+            current, path, drop_score = queue.pop()
+            expanded += 1
+
+            dropped = current.clone()
+            score_before = board.score
+            dropped.move(Direction.Drop, board)
+            hard_drop_score = board.score - score_before
+            board.score = score_before
+            add_landing(
+                dropped,
+                path + [Direction.Drop],
+                drop_score + hard_drop_score,
+            )
+
+            for action in reversed(actions):
+                moved, gained, landed = self._advance_state(
+                    current, action, board
+                )
+                next_path = path + [action]
+                next_score = drop_score + gained
+                if landed:
+                    add_landing(moved, next_path, next_score)
+                    continue
+
+                state = (tuple(sorted(moved.cells)), moved.center)
+                if state not in visited:
+                    visited.add(state)
+                    queue.append((moved, next_path, next_score))
+
+        return list(landings.values())
+
+    def _landing_options(self, board, block, start_y=None, prefix=()):
+        if start_y is None:
+            start_y = block.center[1]
+        options = self._target_landing_options(
+            board, block, start_y, prefix
+        )
+        if not self._has_covered_holes(board):
+            return options
+
+        reachable = self._reachable_landing_options(
+            board, block, start_y, prefix
+        )
+
+        landings = {tuple(sorted(option[0].cells)): option for option in options}
+        for option in reachable:
+            key = tuple(sorted(option[0].cells))
+            if key in landings or not self._is_tuck(option[1]):
+                continue
+            landings[key] = option
+        return list(landings.values())
+
+    def _has_covered_holes(self, board):
+        tops = [board.height] * board.width
+        for x, y in board.cells:
+            tops[x] = min(tops[x], y)
+        return any(
+            (x, y) not in board.cells
+            for x, top in enumerate(tops)
+            for y in range(top + 1, board.height)
+        )
+
+    def _is_tuck(self, path):
+        descended = False
+        moved_horizontally = False
+        for action in path:
+            if action is None or action == Direction.Down:
+                descended = True
+            elif action in (Direction.Left, Direction.Right):
+                if descended:
+                    return True
+                moved_horizontally = True
+            elif isinstance(action, Rotation) and moved_horizontally:
+                return True
+        return False
 
     def _land(self, board, option, next_shape=None):
         landed, _, drop_score = option
@@ -246,12 +365,11 @@ class SearchPlayer(Player):
             return -100000.0
 
         best = None
-        for option in self._landing_options(board, board.falling):
-            result = self._land(board, option)
+        options = self._target_landing_options(board, board.falling)
+        ranked = self._rank_options(board, options, None, len(options))
+        for _, option, result, immediate_reward in ranked:
             reward = (
-                result.score - board.score
-                + self._clear_adjustment(result, board.score, option[2])
-                + self._potential(result)
+                immediate_reward + self._potential(result)
             )
             if best is None or reward > best:
                 best = reward
@@ -274,7 +392,9 @@ class SearchPlayer(Player):
             future.falling.initialize(future)
 
             best = None
-            options = self._landing_options(future, future.falling)
+            options = self._target_landing_options(
+                future, future.falling
+            )
             ranked = self._rank_options(
                 future,
                 options,
@@ -294,6 +414,8 @@ class SearchPlayer(Player):
             immediate_reward += self._clear_adjustment(
                 result, board.score, option[2]
             )
+            if self._is_tuck(option[1]):
+                immediate_reward -= self.TUCK_THRESHOLD
             value = immediate_reward + self._potential(result)
             if next_shape is not None and not result.alive:
                 value -= 100000.0
