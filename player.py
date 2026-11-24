@@ -7,6 +7,16 @@ class Player:
 
 
 class SearchPlayer(Player):
+    PIECE_SHAPES = (
+        Shape.I,
+        Shape.J,
+        Shape.L,
+        Shape.O,
+        Shape.S,
+        Shape.T,
+        Shape.Z,
+    )
+
     CLEAR_ADJUSTMENTS = {
         25: -50,
         100: -25,
@@ -180,21 +190,32 @@ class SearchPlayer(Player):
 
     def _expected_next_value(self, board):
         total = 0.0
-        shapes = (
-            Shape.I,
-            Shape.J,
-            Shape.L,
-            Shape.O,
-            Shape.S,
-            Shape.T,
-            Shape.Z,
-        )
-        for shape in shapes:
+        for shape in self.PIECE_SHAPES:
             future = board.clone()
             future.falling = Block(shape)
             future.falling.initialize(future)
             total += self._best_next_value(future)
-        return total / len(shapes)
+        return total / len(self.PIECE_SHAPES)
+
+    def _expected_unknown_value(self, board):
+        total = 0.0
+        for shape in self.PIECE_SHAPES:
+            future = board.clone()
+            future.falling = Block(shape)
+            future.falling.initialize(future)
+
+            best = None
+            options = self._landing_options(future, future.falling)
+            ranked = self._rank_options(
+                future,
+                options,
+                None,
+                min(2, len(options)),
+            )
+            if ranked:
+                best = ranked[0][0]
+            total += best if best is not None else -100000.0
+        return total / len(self.PIECE_SHAPES)
 
     def _rank_options(self, board, options, next_shape, limit):
         ranked = []
@@ -275,7 +296,7 @@ class SearchPlayer(Player):
                 discard_value = -float("inf")
                 for item in discard_ranked:
                     _, _, landed_board, adjusted_immediate_reward = item
-                    future_value = self._expected_next_value(landed_board)
+                    future_value = self._expected_unknown_value(landed_board)
                     candidate_value = (
                         adjusted_immediate_reward + 0.75 * future_value
                     )
