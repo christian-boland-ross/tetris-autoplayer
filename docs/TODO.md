@@ -1,5 +1,3 @@
-Build and preserve a deliberate I-piece well. Four cleared rows score 1,600 in the engine, far more than one or two rows. Reward placements that keep a deep, clean channel available for an I-piece, while penalizing holes that would make the well unusable. A generic “wells are good” bonus proved risky; make it specific to a usable four-row setup.
-
 Make discard decisions comparable to normal moves. Currently the normal choice uses next-piece lookahead, but the discard comparison ranks immediate placements and uses a fixed heuristic threshold. Compare both options at the same depth and on the same value scale. Spend a discard when the next piece enables a strong clear or avoids a bad board state—not merely because its immediate heuristic looks better.
 
 Tune for points per game, not just survival. The current heuristic favors a safe board, but that can miss chances to prepare for high-scoring clears. Track score components over complete games, then tune the weights for line setup, holes, height, bumpiness, and survival. Use several fixed seeds for tuning and separate seeds to check that improvements generalize.

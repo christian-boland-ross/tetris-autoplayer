@@ -1,5 +1,3 @@
-from math import prod
-
 from board import Action, Block, Direction, Rotation, Shape
 
 
@@ -128,11 +126,14 @@ class SearchPlayer(Player):
                 / (board.width - 1)
                 for y in range(top, top + 4)
             ]
+            all_rows_fill = 1.0
+            for fill in row_fill:
+                all_rows_fill *= fill ** 2
             i_well_potential = max(
                 i_well_potential,
                 1.5 * (
                     30 * sum(fill ** 6 for fill in row_fill)
-                    + 80 * prod(fill ** 2 for fill in row_fill)
+                    + 80 * all_rows_fill
                 ),
             )
 
