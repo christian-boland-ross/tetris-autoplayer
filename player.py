@@ -23,6 +23,14 @@ class SearchPlayer(Player):
         400: 250,
         1600: 700,
     }
+    AGGREGATE_HEIGHT_WEIGHT = 2.0
+    HOLE_WEIGHT = 14.0
+    BUMPINESS_WEIGHT = 1.5
+    MAX_HEIGHT_WEIGHT = 4.0
+    DANGER_WEIGHT = 40.0
+    ROW_COMPLETION_WEIGHT = 12.0
+    WELL_WEIGHT = 2.5
+    I_WELL_WEIGHT = 1.0
 
     def __init__(self):
         self.pieces_played = 0
@@ -161,20 +169,19 @@ class SearchPlayer(Player):
                 ),
             )
 
-        aggregate_height_weight = 2.0
         occupied_cell_weight = 0.1 + 1.5 * endgame
-        danger_weight = 40.0 + 12.0 * endgame
-        i_well_weight = 1.0 - 0.8 * endgame
+        danger_weight = self.DANGER_WEIGHT + 12.0 * endgame
+        i_well_weight = self.I_WELL_WEIGHT * (1.0 - 0.8 * endgame)
 
         return (
-            -aggregate_height_weight * aggregate_height
-            - 14.0 * holes
-            - 1.5 * bumpiness
-            -4.0 * max_height
+            -self.AGGREGATE_HEIGHT_WEIGHT * aggregate_height
+            -self.HOLE_WEIGHT * holes
+            -self.BUMPINESS_WEIGHT * bumpiness
+            -self.MAX_HEIGHT_WEIGHT * max_height
             -occupied_cell_weight * len(board.cells)
             -danger_weight * danger * danger
-            + 12.0 * row_completion
-            + 2.5 * wells
+            + self.ROW_COMPLETION_WEIGHT * row_completion
+            + self.WELL_WEIGHT * wells
             + i_well_weight * i_well_potential
         )
 
