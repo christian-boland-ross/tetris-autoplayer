@@ -1,3 +1,5 @@
+from math import prod
+
 from board import Action, Block, Direction, Rotation, Shape
 
 
@@ -88,16 +90,15 @@ class SearchPlayer(Player):
         return result
 
     def _potential(self, board):
-        heights = []
+        column_tops = [board.height] * board.width
+        row_counts = [0] * board.height
+        for x, y in board.cells:
+            column_tops[x] = min(column_tops[x], y)
+            row_counts[y] += 1
+
+        heights = [board.height - top for top in column_tops]
         holes = 0
-        for x in range(board.width):
-            occupied_y = [y for cell_x, y in board.cells if cell_x == x]
-            if not occupied_y:
-                heights.append(0)
-                continue
-            top = min(occupied_y)
-            height = board.height - top
-            heights.append(height)
+        for x, top in enumerate(column_tops):
             holes += sum(
                 (x, y) not in board.cells
                 for y in range(top + 1, board.height)
@@ -111,14 +112,30 @@ class SearchPlayer(Player):
         max_height = max(heights, default=0)
         danger = max(0, max_height - 14)
         row_completion = sum(
-            (sum((x, y) in board.cells for x in range(board.width))
-             / board.width) ** 3
-            for y in range(board.height)
+            (count / board.width) ** 3 for count in row_counts
         )
         wells = sum(
             min(4, max(0, min(heights[x - 1], heights[x + 1]) - heights[x]))
             for x in range(1, board.width - 1)
         )
+        i_well_potential = 0.0
+        for x, first_block in enumerate(column_tops):
+            top = first_block - 4
+            if top < 0:
+                continue
+            row_fill = [
+                (row_counts[y] - ((x, y) in board.cells))
+                / (board.width - 1)
+                for y in range(top, top + 4)
+            ]
+            i_well_potential = max(
+                i_well_potential,
+                1.5 * (
+                    30 * sum(fill ** 6 for fill in row_fill)
+                    + 80 * prod(fill ** 2 for fill in row_fill)
+                ),
+            )
+
         return (
             -2.0 * aggregate_height
             - 14.0 * holes
@@ -128,6 +145,7 @@ class SearchPlayer(Player):
             - 12.0 * danger * danger
             + 12.0 * row_completion
             + 2.5 * wells
+            + i_well_potential
         )
 
     def _best_next_value(self, board):
