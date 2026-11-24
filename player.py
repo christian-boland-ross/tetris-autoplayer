@@ -29,6 +29,8 @@ class SearchPlayer(Player):
     AGGREGATE_HEIGHT_WEIGHT = 2.0
     HOLE_WEIGHT = 14.0
     COVERED_HOLE_WEIGHT = 0.05
+    NEW_HOLE_PENALTY = 20.0
+    NEW_COVERAGE_PENALTY = 3.0
     BUMPINESS_WEIGHT = 1.5
     MAX_HEIGHT_WEIGHT = 4.0
     DANGER_WEIGHT = 40.0
@@ -241,14 +243,11 @@ class SearchPlayer(Player):
         result.land_block()
         return result
 
-    def _potential(self, board):
+    def _hole_metrics(self, board):
         column_tops = [board.height] * board.width
-        row_counts = [0] * board.height
         for x, y in board.cells:
             column_tops[x] = min(column_tops[x], y)
-            row_counts[y] += 1
 
-        heights = [board.height - top for top in column_tops]
         holes = 0
         covered_holes = 0
         for x, top in enumerate(column_tops):
@@ -259,6 +258,17 @@ class SearchPlayer(Player):
                 else:
                     holes += 1
                     covered_holes += blocks_above
+        return holes, covered_holes
+
+    def _potential(self, board):
+        column_tops = [board.height] * board.width
+        row_counts = [0] * board.height
+        for x, y in board.cells:
+            column_tops[x] = min(column_tops[x], y)
+            row_counts[y] += 1
+
+        heights = [board.height - top for top in column_tops]
+        holes, covered_holes = self._hole_metrics(board)
 
         aggregate_height = sum(heights)
         bumpiness = sum(
@@ -408,6 +418,7 @@ class SearchPlayer(Player):
 
     def _rank_options(self, board, options, next_shape, limit):
         ranked = []
+        holes_before, covered_before = self._hole_metrics(board)
         for option in options:
             result = self._land(board, option, next_shape)
             immediate_reward = result.score - board.score
@@ -416,6 +427,13 @@ class SearchPlayer(Player):
             )
             if self._is_tuck(option[1]):
                 immediate_reward -= self.TUCK_THRESHOLD
+            holes_after, covered_after = self._hole_metrics(result)
+            immediate_reward -= self.NEW_HOLE_PENALTY * max(
+                0, holes_after - holes_before
+            )
+            immediate_reward -= self.NEW_COVERAGE_PENALTY * max(
+                0, covered_after - covered_before
+            )
             value = immediate_reward + self._potential(result)
             if next_shape is not None and not result.alive:
                 value -= 100000.0
