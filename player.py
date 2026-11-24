@@ -34,6 +34,8 @@ class SearchPlayer(Player):
     BUMPINESS_WEIGHT = 1.5
     MAX_HEIGHT_WEIGHT = 4.0
     DANGER_WEIGHT = 40.0
+    EARLY_DANGER_START = 12
+    EARLY_DANGER_WEIGHT = 12.0
     ROW_COMPLETION_WEIGHT = 12.0
     WELL_WEIGHT = 2.5
     I_WELL_WEIGHT = 1.0
@@ -278,6 +280,7 @@ class SearchPlayer(Player):
         max_height = max(heights, default=0)
         stack_pressure = self._stack_pressure(max_height)
         danger = max(0, max_height - 14)
+        early_danger = max(0, max_height - self.EARLY_DANGER_START)
         endgame = self._endgame_progress()
         blocked_spawns = 0
         if stack_pressure > 0:
@@ -339,6 +342,7 @@ class SearchPlayer(Player):
             -self.MAX_HEIGHT_WEIGHT * max_height
             -occupied_cell_weight * len(board.cells)
             -danger_weight * danger * danger
+            -self.EARLY_DANGER_WEIGHT * early_danger * early_danger
             -2500.0 * blocked_spawns
             + self.ROW_COMPLETION_WEIGHT * row_completion
             + well_weight * wells
