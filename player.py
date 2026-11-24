@@ -24,6 +24,12 @@ class SearchPlayer(Player):
         1600: 700,
     }
 
+    def __init__(self):
+        self.pieces_played = 0
+
+    def _endgame_progress(self):
+        return max(0.0, min(1.0, (self.pieces_played - 340) / 60.0))
+
     def _landing_options(self, board, block, start_y=None, prefix=()):
         if start_y is None:
             start_y = block.center[1]
@@ -126,6 +132,7 @@ class SearchPlayer(Player):
         )
         max_height = max(heights, default=0)
         danger = max(0, max_height - 14)
+        endgame = self._endgame_progress()
         row_completion = sum(
             (count / board.width) ** 3 for count in row_counts
         )
@@ -154,21 +161,44 @@ class SearchPlayer(Player):
                 ),
             )
 
+        aggregate_height_weight = 2.0
+        occupied_cell_weight = 0.1 + 1.5 * endgame
+        danger_weight = 40.0 + 12.0 * endgame
+        i_well_weight = 1.0 - 0.8 * endgame
+
         return (
-            -2.0 * aggregate_height
+            -aggregate_height_weight * aggregate_height
             - 14.0 * holes
             - 1.5 * bumpiness
-            - 4.0 * max_height
-            - 0.1 * len(board.cells)
-            - 40.0 * danger * danger
+            -4.0 * max_height
+            -occupied_cell_weight * len(board.cells)
+            -danger_weight * danger * danger
             + 12.0 * row_completion
             + 2.5 * wells
-            + i_well_potential
+            + i_well_weight * i_well_potential
         )
 
     def _clear_adjustment(self, result, score_before, drop_score):
         clear_score = result.score - score_before - drop_score
-        return self.CLEAR_ADJUSTMENTS.get(clear_score, 0)
+        adjustment = self.CLEAR_ADJUSTMENTS.get(clear_score, 0)
+        endgame = self._endgame_progress()
+        if clear_score <= 100:
+            return adjustment * (1.0 - endgame)
+        max_height = max(
+            (
+                result.height - min(y for cell_x, y in result.cells
+                                    if cell_x == x)
+                for x in range(result.width)
+                if any(cell_x == x for cell_x, _ in result.cells)
+            ),
+            default=0,
+        )
+        low_stack_bonus = (
+            1.05 if self.pieces_played < 340 and max_height <= 8 else 1.0
+        )
+        return adjustment * (
+            low_stack_bonus + 0.5 * endgame
+        )
 
     def _best_next_value(self, board):
         if board.falling is None:
@@ -245,6 +275,7 @@ class SearchPlayer(Player):
     def choose_action(self, board):
         if board.falling is None:
             return None
+        self.pieces_played += 1
 
         best_value = -float("inf")
         best_path = [Direction.Drop]
