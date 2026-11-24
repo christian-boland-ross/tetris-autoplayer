@@ -205,8 +205,28 @@ class SearchPlayer(Player):
                         best_path = item[1][1]
 
         if board.discards_remaining > 0 and board.next is not None:
-            if normal_ranked and not normal_ranked[0][2].alive:
-                best_path = [Action.Discard]
+            discard_board = board.clone()
+            discard_board.discard()
+            if discard_board.falling is not None:
+                discard_options = self._landing_options(
+                    discard_board, discard_board.falling
+                )
+                discard_ranked = self._rank_options(
+                    discard_board,
+                    discard_options,
+                    None,
+                    len(discard_options),
+                )
+                if discard_ranked:
+                    discard_value = discard_ranked[0][0]
+                    current_value = (
+                        normal_ranked[0][0] if normal_ranked else -float("inf")
+                    )
+                    resource_cost = 100 + 10 * (
+                        10 - board.discards_remaining
+                    )
+                    if discard_value > current_value + resource_cost:
+                        best_path = [Action.Discard]
 
         return best_path
 
