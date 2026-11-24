@@ -9,6 +9,14 @@ class Player:
 class SearchPlayer(Player):
     MAX_REACHABLE_STATES = 80
     TUCK_THRESHOLD = 100
+    BOMB_CURRENT_CANDIDATES = 3
+    BOMB_RESERVE_BASE = 45.0
+    BOMB_RESERVE_SCARCITY = 20.0
+    BOMB_URGENCY_START = 16
+    BOMB_URGENCY_FULL = 22
+    BOMB_LAST_RESERVE_HEIGHT = 8
+    BOMB_LAST_RESERVE_VALUE = 100000.0
+    BOMB_EMERGENCY_VALUE = -50000.0
 
     PIECE_SHAPES = (
         Shape.I,
@@ -48,6 +56,40 @@ class SearchPlayer(Player):
 
     def _stack_pressure(self, max_height):
         return max(0.0, min(1.0, (max_height - 16) / 6.0))
+
+    def _max_height(self, board):
+        column_tops = [board.height] * board.width
+        for x, y in board.cells:
+            column_tops[x] = min(column_tops[x], y)
+        return max(
+            (board.height - top for top in column_tops),
+            default=0,
+        )
+
+    def _bomb_reserve_value(self, board):
+        max_height = self._max_height(board)
+        reserve = (
+            self.BOMB_RESERVE_BASE
+            + self.BOMB_RESERVE_SCARCITY
+            / max(1, board.bombs_remaining)
+        )
+        if (
+            board.bombs_remaining == 1
+            and max_height >= self.BOMB_LAST_RESERVE_HEIGHT
+            and max_height < self.BOMB_URGENCY_START
+        ):
+            return self.BOMB_LAST_RESERVE_VALUE
+        if max_height < self.BOMB_URGENCY_START:
+            return self.BOMB_RESERVE_BASE
+        urgency = min(
+            1.0,
+            max(
+                0.0,
+                (max_height - self.BOMB_URGENCY_START)
+                / (self.BOMB_URGENCY_FULL - self.BOMB_URGENCY_START),
+            ),
+        )
+        return reserve * (1.0 - urgency)
 
     def _target_landing_options(self, board, block, start_y=None, prefix=()):
         if start_y is None:
@@ -486,10 +528,24 @@ class SearchPlayer(Player):
                     start_y=board.falling.center[1],
                     prefix=[Action.Bomb],
                 )
+                bomb_candidate_limit = (
+                    self.BOMB_CURRENT_CANDIDATES
+                    if self._max_height(board) >= self.BOMB_URGENCY_START
+                    else 1
+                )
+                reserve_value = self._bomb_reserve_value(board)
+                if best_value <= self.BOMB_EMERGENCY_VALUE:
+                    reserve_value = 0.0
                 for item in self._rank_options(
-                    board, bomb_options, Shape.B, 1
+                    board,
+                    bomb_options,
+                    Shape.B,
+                    min(bomb_candidate_limit, len(bomb_options)),
                 ):
-                    value = self._lookahead_value(item, Shape.B) - 45
+                    value = (
+                        self._lookahead_value(item, Shape.B)
+                        - reserve_value
+                    )
                     if value > best_value:
                         best_value = value
                         best_path = item[1][1]
