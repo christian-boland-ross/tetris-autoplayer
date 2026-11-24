@@ -8,10 +8,10 @@ class Player:
 
 class SearchPlayer(Player):
     CLEAR_ADJUSTMENTS = {
-        25: -25,
-        100: 0,
-        400: 150,
-        1600: 400,
+        25: -50,
+        100: -25,
+        400: 250,
+        1600: 700,
     }
 
     def _landing_options(self, board, block, start_y=None, prefix=()):
