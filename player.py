@@ -7,6 +7,13 @@ class Player:
 
 
 class SearchPlayer(Player):
+    CLEAR_ADJUSTMENTS = {
+        25: -25,
+        100: 0,
+        400: 150,
+        1600: 400,
+    }
+
     def _landing_options(self, board, block, start_y=None, prefix=()):
         if start_y is None:
             start_y = block.center[1]
@@ -143,11 +150,15 @@ class SearchPlayer(Player):
             - 1.5 * bumpiness
             - 4.0 * max_height
             - 0.1 * len(board.cells)
-            - 12.0 * danger * danger
+            - 40.0 * danger * danger
             + 12.0 * row_completion
             + 2.5 * wells
             + i_well_potential
         )
+
+    def _clear_adjustment(self, result, score_before, drop_score):
+        clear_score = result.score - score_before - drop_score
+        return self.CLEAR_ADJUSTMENTS.get(clear_score, 0)
 
     def _best_next_value(self, board):
         if board.falling is None:
@@ -158,16 +169,41 @@ class SearchPlayer(Player):
         best = None
         for option in self._landing_options(board, board.falling):
             result = self._land(board, option)
-            reward = result.score - board.score + self._potential(result)
+            reward = (
+                result.score - board.score
+                + self._clear_adjustment(result, board.score, option[2])
+                + self._potential(result)
+            )
             if best is None or reward > best:
                 best = reward
         return best if best is not None else -100000.0
+
+    def _expected_next_value(self, board):
+        total = 0.0
+        shapes = (
+            Shape.I,
+            Shape.J,
+            Shape.L,
+            Shape.O,
+            Shape.S,
+            Shape.T,
+            Shape.Z,
+        )
+        for shape in shapes:
+            future = board.clone()
+            future.falling = Block(shape)
+            future.falling.initialize(future)
+            total += self._best_next_value(future)
+        return total / len(shapes)
 
     def _rank_options(self, board, options, next_shape, limit):
         ranked = []
         for option in options:
             result = self._land(board, option, next_shape)
             immediate_reward = result.score - board.score
+            immediate_reward += self._clear_adjustment(
+                result, board.score, option[2]
+            )
             value = immediate_reward + self._potential(result)
             if next_shape is not None and not result.alive:
                 value -= 100000.0
@@ -177,13 +213,13 @@ class SearchPlayer(Player):
         return ranked[:limit]
 
     def _lookahead_value(self, item, next_shape):
-        value, _, result, immediate_reward = item
+        value, _, result, adjusted_immediate_reward = item
         if next_shape is None:
             return value
         future_value = self._best_next_value(result)
         if future_value <= -100000.0:
             return value - 100000.0
-        return immediate_reward + 0.75 * future_value
+        return adjusted_immediate_reward + 0.75 * future_value
 
     def choose_action(self, board):
         if board.falling is None:
@@ -234,14 +270,20 @@ class SearchPlayer(Player):
                     discard_board,
                     discard_options,
                     None,
-                    len(discard_options),
+                    min(3, len(discard_options)),
                 )
-                if discard_ranked:
-                    discard_value = discard_ranked[0][0]
-                    current_value = (
-                        normal_ranked[0][0] if normal_ranked else -float("inf")
+                discard_value = -float("inf")
+                for item in discard_ranked:
+                    _, _, landed_board, adjusted_immediate_reward = item
+                    future_value = self._expected_next_value(landed_board)
+                    candidate_value = (
+                        adjusted_immediate_reward + 0.75 * future_value
                     )
-                    resource_cost = 100 + 10 * (
+                    discard_value = max(discard_value, candidate_value)
+
+                if discard_ranked:
+                    current_value = best_value
+                    resource_cost = 500 + 50 * (
                         10 - board.discards_remaining
                     )
                     if discard_value > current_value + resource_cost:
