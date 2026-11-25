@@ -1,5 +1,0 @@
-Evaluate bomb placements more fully. Bombs don’t score for destroyed cells, so use them when their removal and resulting falls enable better future clears or prevent top-out. Compare multiple bomb landing locations with normal placements, and account for the value of keeping a bomb for later.
-
-Add expected lookahead for unknown future pieces. The next piece is known, but later pieces aren’t. Since the local adversary selects uniformly, estimate future value across all seven shapes after the known piece. A bounded beam or expected-value search can evaluate whether a move preserves useful wells without searching every possible move sequence.
-
-Measure discard and bomb use explicitly. For every seed, record clears by size, total score, survival, and remaining resources. This will reveal whether the strategy is leaving valuable resources unused or spending them without earning enough back.
